@@ -1,0 +1,4 @@
+example.com
+randomdomain.net
+test123.org
+mywebsite.io
