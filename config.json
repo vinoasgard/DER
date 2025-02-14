@@ -1,20 +1,21 @@
 {
-    "fromName": "Amazon Service",
-    "fromNames": [
-      "=?UTF-8?B?QW1hem9uIFNlcnZpY2U=?=",
-      "=?UTF-8?B?bm8tcmVwbHlAYW1hem9uLmNvbQ==?=",
-      "=?UTF-8?B?bm90aWZpY2F0aW9uc0BhbWF6b24uY29t?=",
-      "=?UTF-8?B?YW1hem9uLWFsZXJ0c0BhbWF6b24uY29t?="
-    ],
-    "subjectTemplate": "My latest column: 'Cheering the Swamp'   ",
-    "deleteSentEmails": false,
-    "testEmail": "jean.pierrekw@comcast.net",
-    "enableTestEmail": true,
-    "enableRandomFromName": false,
-    "enableAttachment": false,
-    "newFileNameTemplate": "{randomID:7}_{randomUppercase:5}_{randomLowercase:4}.pdf",
-    "replyToTemplate" : "supprt{randomID:7}@ggle{randomID:7}.com",
-    "letter"  : "1_oBTccBYs6C6q8IgKq8lk0vZo3fizRAK",
-    "ImageBase64" : "",
-    "attachment"  : ""
-  }
+  "fromName": "Waraswaras",
+  "fromNames": [
+    "=?UTF-8?B?QW1hem9uIFNlcnZpY2U=?=",
+    "=?UTF-8?B?bm8tcmVwbHlAYW1hem9uLmNvbQ==?=",
+    "=?UTF-8?B?bm90aWZpY2F0aW9uc0BhbWF6b24uY29t?=",
+    "=?UTF-8?B?YW1hem9uLWFsZXJ0c0BhbWF6b24uY29t?="
+  ],
+  "subjectTemplate": "My latest column: 'Cheering the Swamp'   ",
+  "deleteSentEmails": false,
+  "testEmail": "jean.pierrekw@comcast.net",
+  "enableTestEmail": true,
+  "enableRandomFromName": false,
+  "enableAttachment": false,
+  "newFileNameTemplate": "{randomID:7}_{randomUppercase:5}_{randomLowercase:4}.pdf",
+  "replyToTemplate": "supprt{randomID:7}@ggle{randomID:7}.com",
+  "letter": "1_oBTccBYs6C6q8IgKq8lk0vZo3fizRAK",
+  "ImageBase64": "",
+  "attachment": "",
+  "randomDomain": ["google.com", "yahoo.com", "bing.com"]
+}
