@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,20 +16,22 @@ import (
 
 	"github.com/fatih/color"
 )
-// Config struct untuk membaca config.json
+
+// Config struct for reading config.json
 type Config struct {
-	DeleteSentEmails    bool   `json:"deleteSentEmails"`
-	NewFileNameTemplate string `json:"newFileNameTemplate"`
-	SubjectTemplate     string `json:"subjectTemplate"`
-	ReplyToTemplate     string `json:"replyToTemplate"`
-	FromName            string `json:"fromName"`
-	EnableAttachment    bool   `json:"enableAttachment"`
-	Letter              string `json:"letter"`
-	ImageBase64         string `json:"ImageBase64"`
-	Attachment          string `json:"attachment"`
+	DeleteSentEmails    bool     `json:"deleteSentEmails"`
+	NewFileNameTemplate string   `json:"newFileNameTemplate"`
+	SubjectTemplate     string   `json:"subjectTemplate"`
+	ReplyToTemplate     string   `json:"replyToTemplate"`
+	FromName            string   `json:"fromName"`
+	EnableAttachment    bool     `json:"enableAttachment"`
+	Letter              string   `json:"letter"`
+	ImageBase64         string   `json:"ImageBase64"`
+	Attachment          string   `json:"attachment"`
+	RandomDomain        []string `json:"randomDomain"`
 }
 
-// Variabel global
+// Global variables
 var (
 	globalSentCount      int
 	globalRemainingCount int
@@ -36,12 +39,9 @@ var (
 	failureCount         int
 	webAppLimitReached   = make(map[int]bool)
 	config               Config
-	proxyList            []string
-	proxyIndex           int
-	proxyMutex           sync.Mutex
 )
 
-// Fungsi untuk membaca file dan mengembalikan slice string
+// Function to read a file and return a slice of strings
 func readFile(fileName string) ([]string, error) {
 	file, err := os.Open(fileName)
 	if err != nil {
@@ -57,7 +57,7 @@ func readFile(fileName string) ([]string, error) {
 	return lines, scanner.Err()
 }
 
-// Fungsi untuk menghasilkan string acak
+// Function to generate a random string
 func generateRandomString(length int, charset string) string {
 	var charPool string
 	switch charset {
@@ -81,27 +81,28 @@ func generateRandomString(length int, charset string) string {
 	return string(result)
 }
 
-// Fungsi untuk mengambil proxy dari format username:password:hostname:port
-func getProxyFromLuna(proxyString string) (string, error) {
-	proxyMutex.Lock()
-	defer proxyMutex.Unlock()
-
-	if len(proxyList) == 0 {
-		return "", fmt.Errorf("no proxies available")
+func getRandomDomain() (string, error) {
+	if len(config.RandomDomain) == 0 {
+		return "", fmt.Errorf("no random domains available")
 	}
-
-	proxy := proxyList[proxyIndex]
-	proxyIndex = (proxyIndex + 1) % len(proxyList) // Rotasi proxy
-
-	return proxy, nil
+	rand.Seed(time.Now().UnixNano())
+	randomIndex := rand.Intn(len(config.RandomDomain))
+	return config.RandomDomain[randomIndex], nil
 }
 
-// Fungsi untuk mengirim email dengan proxy
-func sendEmail(webAppURL, email string, index int, wg *sync.WaitGroup, proxyString string) {
+// Function to send email
+func sendEmail(webAppURL, email string, index int, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	if webAppLimitReached[index] {
 		color.Yellow("WebApp #%d already rate-limited. Skipping email %s", index+1, email)
+		return
+	}
+
+	randomDomain, err := getRandomDomain()
+	if err != nil {
+		color.Red("Failed to get random domain for %s: %v", email, err)
+		failureCount++
 		return
 	}
 
@@ -117,6 +118,7 @@ func sendEmail(webAppURL, email string, index int, wg *sync.WaitGroup, proxyStri
 		"{randomUppercase:5}", randomUppercase,
 		"{randomLowercase:4}", randomLowercase,
 		"{randomNumber:10}", randomNumber,
+		"{randomDomain}", randomDomain,
 	).Replace(config.SubjectTemplate)
 
 	replyTo := strings.NewReplacer(
@@ -125,39 +127,16 @@ func sendEmail(webAppURL, email string, index int, wg *sync.WaitGroup, proxyStri
 		"{randomUppercase:5}", randomUppercase,
 		"{randomLowercase:4}", randomLowercase,
 		"{randomNumber:10}", randomNumber,
+		"{randomDomain}", randomDomain,
 	).Replace(config.ReplyToTemplate)
 
-	// Ambil proxy dari string proxyString
-	proxy, err := getProxyFromLuna(proxyString)
-	if err != nil {
-		color.Red("Failed to get proxy: %v", err)
-		failureCount++
-		return
-	}
-
-	// Parsing proxy string ke dalam komponen username, password, hostname, port
-	proxyParts := strings.Split(proxy, ":")
-	if len(proxyParts) != 4 {
-		color.Red("Invalid proxy format: %s", proxy)
-		failureCount++
-		return
-	}
-
-	username := proxyParts[0]
-	password := proxyParts[1]
-	hostname := proxyParts[2]
-	port := proxyParts[3]
-
-	// Setup proxy
-	proxyUrl, err := url.Parse(fmt.Sprintf("http://%s:%s@%s:%s", username, password, hostname, port))
-	if err != nil {
-		color.Red("Failed to parse proxy URL: %v", err)
-		failureCount++
-		return
+	// Disable SSL verification (for testing purposes only)
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 
 	client := &http.Client{
-		Transport: &http.Transport{Proxy: http.ProxyURL(proxyUrl)},
+		Transport: tr,
 	}
 
 	// Prepare request
@@ -179,14 +158,28 @@ func sendEmail(webAppURL, email string, index int, wg *sync.WaitGroup, proxyStri
 	q.Add("htmlFileId", config.Letter)
 	q.Add("imageFileId", config.ImageBase64)
 	q.Add("attachmentFileId", config.Attachment)
+	q.Add("randomDomain", randomDomain)
 	req.URL.RawQuery = q.Encode()
 
 	// Send request
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Failed to send email to %s: %v", email, err)
-		failureCount++
-		return
+		// Fallback to HTTP if HTTPS fails
+		if strings.Contains(err.Error(), "server gave HTTP response to HTTPS client") {
+			color.Yellow("HTTPS failed, falling back to HTTP for %s", email)
+			webAppURL = strings.Replace(webAppURL, "https://", "http://", 1)
+			req.URL, _ = url.Parse(webAppURL)
+			resp, err = client.Do(req)
+			if err != nil {
+				log.Printf("Failed to send email to %s: %v", email, err)
+				failureCount++
+				return
+			}
+		} else {
+			log.Printf("Failed to send email to %s: %v", email, err)
+			failureCount++
+			return
+		}
 	}
 	defer resp.Body.Close()
 
@@ -205,12 +198,22 @@ func sendEmail(webAppURL, email string, index int, wg *sync.WaitGroup, proxyStri
 	successCount++
 	globalSentCount++
 	globalRemainingCount--
-	color.Green("Email sent to: %s using proxy: %s", email, proxy)
+	color.Green("Email sent to: %s", email)
 }
 
-// Fungsi utama
+// Function to distribute emails among SMTP servers
+func distributeEmails(emailList []string, webAppURLs []string) map[int][]string {
+	distribution := make(map[int][]string)
+	for i, email := range emailList {
+		index := i % len(webAppURLs)
+		distribution[index] = append(distribution[index], email)
+	}
+	return distribution
+}
+
+// Main function
 func main() {
-	// Baca config.json
+	// Read config.json
 	configFile, err := os.ReadFile("config.json")
 	if err != nil {
 		log.Fatalf("Failed to read config.json: %v", err)
@@ -219,37 +222,41 @@ func main() {
 		log.Fatalf("Failed to parse config.json: %v", err)
 	}
 
-	// Baca daftar email
+	// Read email list
 	emailList, err := readFile("list.txt")
 	if err != nil {
 		log.Fatalf("Failed to read email list: %v", err)
 	}
 	globalRemainingCount = len(emailList)
 
-	// Baca Web App URLs
+	// Read Web App URLs
 	webAppURLs, err := readFile("smtp.txt")
 	if err != nil {
 		log.Fatalf("Failed to read smtp.txt: %v", err)
 	}
 
-	// Daftar proxy dari string username:password:hostname:port
-	proxyList = []string{
-		"user-smcrew-region-us:Waras123:as.o0u389rs.lunaproxy.net:12233",
-		// Tambahkan lebih banyak proxy jika diperlukan
-	}
+	// Distribute emails among SMTP servers
+	emailDistribution := distributeEmails(emailList, webAppURLs)
 
-	// Kirim email secara konkuren
+	// Send emails concurrently
 	var wg sync.WaitGroup
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
 
 	for i, webAppURL := range webAppURLs {
-		for _, email := range emailList {
-			wg.Add(1)
-			go sendEmail(webAppURL, email, i, &wg, proxyList[0]) // Gunakan proxy pertama
-		}
+		wg.Add(1)
+		go func(index int, url string) {
+			defer wg.Done()
+			for _, email := range emailDistribution[index] {
+				<-ticker.C
+				wg.Add(1)
+				go sendEmail(url, email, index, &wg)
+			}
+		}(i, webAppURL)
 	}
 	wg.Wait()
 
-	// Tampilkan recap
+	// Recap
 	color.Blue("\n=== Email Delivery Recap ===")
 	color.Green("Total Success: %d", successCount)
 	color.Red("Total Failed: %d", failureCount)
